@@ -218,11 +218,23 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
               tick={{ fill: '#004984', fontSize: 12 }}
               tickMargin={16}
               height={60}
+              label={{
+                value: 'Week Beginning',
+                position: 'insideBottom',
+                offset: -30,
+                style: { fill: '#004984', fontSize: 12 },
+              }}
             />
             <YAxis
               domain={[yMin, yMax]}
               tick={{ fill: '#004984', fontSize: 12 }}
               tickMargin={8}
+              label={{
+                value: kpi.name,
+                angle: -90,
+                position: 'insideLeft',
+                style: { textAnchor: 'middle', fill: '#004984', fontSize: 12 },
+              }}
             />
             <Tooltip
               contentStyle={{ backgroundColor: '#FFFFFF', border: '1px solid #D4D2CA', borderRadius: 10 }}
@@ -278,8 +290,11 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <div className="absolute left-4 top-2 text-sm font-bold" style={{ color: '#3047B0' }}>
-        {kpi.name} ({kpi.unit})
+      <div
+        className="absolute top-2 left-1/2 -translate-x-1/2 text-sm font-bold"
+        style={{ color: '#3047B0' }}
+      >
+        {kpi.name} for LOB
       </div>
     </div>
   );

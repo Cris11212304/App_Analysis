@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, ReferenceLine, ReferenceArea } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, ReferenceLine, ReferenceArea, Bar, ComposedChart } from 'recharts';
 
 // Payload contains the weekly KPI data along with goals. In a production
 // environment you could fetch this from a service or import from a JSON
@@ -91,6 +91,27 @@ const PAYLOAD = {
       { week: '2025-08-04', num: 1914.0, den: 248.5, value: 7.701207243460765 },
     ],
   },
+  weeklyCounts: [
+    { week: '2025-03-31', count: 1500 },
+    { week: '2025-04-07', count: 1400 },
+    { week: '2025-04-14', count: 1600 },
+    { week: '2025-04-21', count: 1550 },
+    { week: '2025-04-28', count: 1700 },
+    { week: '2025-05-05', count: 1650 },
+    { week: '2025-05-12', count: 1580 },
+    { week: '2025-05-19', count: 1500 },
+    { week: '2025-05-26', count: 1480 },
+    { week: '2025-06-02', count: 1400 },
+    { week: '2025-06-09', count: 1350 },
+    { week: '2025-06-16', count: 1300 },
+    { week: '2025-06-23', count: 1250 },
+    { week: '2025-06-30', count: 1200 },
+    { week: '2025-07-07', count: 1100 },
+    { week: '2025-07-14', count: 1000 },
+    { week: '2025-07-21', count: 900 },
+    { week: '2025-07-28', count: 800 },
+    { week: '2025-08-04', count: 700 },
+  ],
   dailyDetail: {
     AHT: {},
     CHT: {},
@@ -195,13 +216,20 @@ function ChartTooltip({ active, label, payload, kpi, isPercent, meta }) {
 function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
   const kpi = KPI_DEFS[kpiKey];
   // Convert the raw weekly data into a structure with ISO dates and values.
+  const countsByWeek = useMemo(() => {
+    return (PAYLOAD.weeklyCounts || []).reduce((acc, d) => {
+      acc[d.week] = d.count;
+      return acc;
+    }, {});
+  }, []);
   const data = useMemo(
     () =>
       (PAYLOAD.weeklySeries[kpiKey] || []).map((d) => ({
         date: d.week, // ISO string without time
         value: +d.value,
+        count: countsByWeek[d.week] || 0,
       })),
-    [kpiKey]
+    [kpiKey, countsByWeek]
   );
   // Compute the linear regression line and R² if requested.
   const regression = useMemo(() => (showTrend ? linearRegression(data) : null), [data, showTrend]);
@@ -278,7 +306,7 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
     >
       <div className="h-[420px] p-4">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart
+          <ComposedChart
             data={chartData}
             margin={{ top: 16, right: 24, bottom: 40, left: 0 }}
             onClick={handleClick}
@@ -304,6 +332,7 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
               }}
             />
             <YAxis
+              yAxisId="left"
               domain={[yMin, yMax]}
               tick={{ fill: '#004984', fontSize: 12 }}
               tickFormatter={(v) => (isPercent ? `${(v * 100).toFixed(2)}%` : v.toFixed(2))}
@@ -312,6 +341,17 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
                 value: kpi.name,
                 angle: -90,
                 position: 'insideLeft',
+                style: { textAnchor: 'middle', fill: '#004984', fontSize: 12 },
+              }}
+            />
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              tick={{ fill: '#004984', fontSize: 12 }}
+              label={{
+                value: 'Volumen',
+                angle: -90,
+                position: 'insideRight',
                 style: { textAnchor: 'middle', fill: '#004984', fontSize: 12 },
               }}
             />
@@ -338,6 +378,7 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
             )}
             {/* Primary KPI line */}
             <Line
+              yAxisId="left"
               type="monotone"
               dataKey="value"
               stroke="url(#lineGradient)"
@@ -345,9 +386,11 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
               dot={{ r: 4, strokeWidth: 2, stroke: '#FFFFFF', fill: 'url(#lineGradient)', cursor: 'pointer' }}
               activeDot={{ r: 6, strokeWidth: 2, stroke: '#FFFFFF', fill: 'url(#lineGradient)' }}
             />
+            <Bar yAxisId="right" dataKey="count" fill="#D4D2CA" barSize={20} />
             {/* Trend line (linear regression) */}
             {showTrend && regression?.line?.length > 0 && (
               <Line
+                yAxisId="left"
                 type="linear"
                 dataKey="trend"
                 stroke="#4498F2"
@@ -363,7 +406,7 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
                 <stop offset="100%" stopColor="#A02B93" />
               </linearGradient>
             </defs>
-          </LineChart>
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
       <div
@@ -432,7 +475,7 @@ function SecondaryPanel({ kpiKey, weekISO }) {
       </div>
       {mode === 'detail' ? (
         <div
-          className="h-[180px] rounded-xl overflow-hidden"
+          className="h-[220px] rounded-xl overflow-hidden"
           style={{ backgroundColor: '#FFFFFF', border: '1px solid #D4D2CA' }}
         >
           {hasDaily ? (
@@ -485,22 +528,12 @@ function SecondaryPanel({ kpiKey, weekISO }) {
         </div>
       ) : (
         <div
-          className="h-[180px] rounded-xl grid place-items-center text-sm"
+          className="h-[220px] rounded-xl grid place-items-center text-sm"
           style={{ backgroundColor: '#FFFFFF', border: '1px solid #D4D2CA', color: '#004984' }}
         >
           Box plot (90% vol.) — disponible en el ZIP completo o si cargas detalle diario/por agente.
         </div>
       )}
-      {/* Agent-level statistics placeholder */}
-      <div
-        className="mt-2 rounded-xl p-2 text-xs"
-        style={{ backgroundColor: '#FFFFFF', border: '1px solid #D4D2CA', color: '#004984' }}
-      >
-        <div className="font-bold mb-1">Agent-level (90% volume)</div>
-        <div className="text-[12px]">
-          Para este preview, la tarjeta se completa cuando haya datos por agente. En el ZIP final quedará calculada (nAgents90, mean, VSF, max/min, #cumplen/#no).
-        </div>
-      </div>
     </div>
   );
 }

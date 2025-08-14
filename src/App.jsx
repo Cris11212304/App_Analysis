@@ -132,10 +132,10 @@ function linearRegression(points) {
   const sumXX = xVals.reduce((s, v) => s + v * v, 0);
   const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
   const intercept = (sumY - slope * sumX) / n;
-  const line = [
-    { date: points[0].date, value: intercept + slope * xVals[0] },
-    { date: points[n - 1].date, value: intercept + slope * xVals[n - 1] },
-  ];
+  const line = points.map((p, i) => ({
+    date: p.date,
+    value: intercept + slope * xVals[i],
+  }));
   const meanY = sumY / n;
   const ssTot = yVals.reduce((s, v) => s + (v - meanY) ** 2, 0);
   const ssRes = xVals.reduce((s, v, i) => s + (yVals[i] - (intercept + slope * v)) ** 2, 0);
@@ -177,6 +177,16 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
       })),
     [kpiKey]
   );
+  // Compute the linear regression line and R² if requested.
+  const regression = useMemo(() => (showTrend ? linearRegression(data) : null), [data, showTrend]);
+  // Merge regression values into chart data when trend line is shown.
+  const chartData = useMemo(
+    () =>
+      showTrend && regression
+        ? data.map((d, i) => ({ ...d, trend: regression.line[i]?.value }))
+        : data,
+    [data, regression, showTrend]
+  );
   // Compute the min and max for the y‐axis and pad them slightly.
   const [yMin, yMax] = useMemo(() => {
     if (!data.length) return [0, 0];
@@ -197,10 +207,8 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
     const maxVal = Math.max(...data.map((d) => Math.abs(d.value)));
     return maxVal <= 1;
   }, [data]);
-  // Compute the linear regression line and R² if requested.
-  const regression = useMemo(() => (showTrend ? linearRegression(data) : null), [data, showTrend]);
   // Determine the selected ISO date for the reference area.
-  const selectedDate = data[selectedIndex]?.date;
+  const selectedDate = chartData[selectedIndex]?.date;
   // Handle click events on the chart. Recharts provides the activeLabel
   // property on the event payload which corresponds to the x‐axis label.
   const handleClick = (chartState) => {
@@ -217,7 +225,7 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
       <div className="h-[420px] p-4">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
-            data={data}
+            data={chartData}
             margin={{ top: 16, right: 24, bottom: 40, left: 0 }}
             onClick={handleClick}
           >
@@ -291,9 +299,8 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
             {/* Trend line (linear regression) */}
             {showTrend && regression?.line?.length > 0 && (
               <Line
-                data={regression.line}
                 type="linear"
-                dataKey="value"
+                dataKey="trend"
                 stroke="#4498F2"
                 strokeDasharray="6 6"
                 strokeWidth={2}

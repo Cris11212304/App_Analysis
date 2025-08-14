@@ -118,19 +118,29 @@ const KPI_DEFS = {
   CPH: { name: 'CPH', unit: 'cases/hour', hasGoal: true, goal: PAYLOAD.goals.CPH },
 };
 
-// Calculate a simple moving average for the provided points. The moving
-// average smooths out short–term fluctuations and is controlled by the
-// window size `n`. It returns an array of objects with the same date
-// formatting as the chart expects.
-function movingAverage(points, n = 3) {
-  const out = [];
-  for (let i = 0; i < points.length; i++) {
-    const start = Math.max(0, i - n + 1);
-    const slice = points.slice(start, i + 1);
-    const avg = slice.reduce((s, p) => s + p.value, 0) / slice.length;
-    out.push({ date: slice[slice.length - 1].date, value: avg });
-  }
-  return out;
+// Perform a simple linear regression over the provided points (using the
+// index as the independent variable). Returns the end points of the trend
+// line along with the coefficient of determination (R²).
+function linearRegression(points) {
+  const n = points.length;
+  if (n === 0) return { line: [], r2: 0 };
+  const xVals = points.map((_, i) => i);
+  const yVals = points.map((p) => p.value);
+  const sumX = xVals.reduce((s, v) => s + v, 0);
+  const sumY = yVals.reduce((s, v) => s + v, 0);
+  const sumXY = xVals.reduce((s, v, i) => s + v * yVals[i], 0);
+  const sumXX = xVals.reduce((s, v) => s + v * v, 0);
+  const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+  const line = [
+    { date: points[0].date, value: intercept + slope * xVals[0] },
+    { date: points[n - 1].date, value: intercept + slope * xVals[n - 1] },
+  ];
+  const meanY = sumY / n;
+  const ssTot = yVals.reduce((s, v) => s + (v - meanY) ** 2, 0);
+  const ssRes = xVals.reduce((s, v, i) => s + (yVals[i] - (intercept + slope * v)) ** 2, 0);
+  const r2 = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+  return { line, r2 };
 }
 
 // Return the index of the maximum value in an array of points. If the array
@@ -181,8 +191,14 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
     const padding = range === 0 ? 1 : range * 0.05;
     return [Math.max(0, min - padding), max + padding];
   }, [data]);
-  // Compute the trend line (moving average) if requested.
-  const trend = useMemo(() => (showTrend ? movingAverage(data, 3) : []), [data, showTrend]);
+  // Determine if values should be shown as percentages (max ≤ 1).
+  const isPercent = useMemo(() => {
+    if (!data.length) return false;
+    const maxVal = Math.max(...data.map((d) => Math.abs(d.value)));
+    return maxVal <= 1;
+  }, [data]);
+  // Compute the linear regression line and R² if requested.
+  const regression = useMemo(() => (showTrend ? linearRegression(data) : null), [data, showTrend]);
   // Determine the selected ISO date for the reference area.
   const selectedDate = data[selectedIndex]?.date;
   // Handle click events on the chart. Recharts provides the activeLabel
@@ -228,6 +244,7 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
             <YAxis
               domain={[yMin, yMax]}
               tick={{ fill: '#004984', fontSize: 12 }}
+              tickFormatter={(v) => (isPercent ? `${(v * 100).toFixed(2)}%` : v.toFixed(2))}
               tickMargin={8}
               label={{
                 value: kpi.name,
@@ -239,7 +256,10 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
             <Tooltip
               contentStyle={{ backgroundColor: '#FFFFFF', border: '1px solid #D4D2CA', borderRadius: 10 }}
               labelStyle={{ color: '#004984' }}
-              formatter={(value) => [Number(value).toFixed(2), kpi.unit]}
+              formatter={(value) => [
+                isPercent ? `${(Number(value) * 100).toFixed(2)}%` : Number(value).toFixed(2),
+                kpi.unit,
+              ]}
             />
             {/* Goal line, if applicable */}
             {kpi.hasGoal && (
@@ -268,11 +288,11 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
               dot={{ r: 4, strokeWidth: 2, stroke: '#FFFFFF', fill: 'url(#lineGradient)', cursor: 'pointer' }}
               activeDot={{ r: 6, strokeWidth: 2, stroke: '#FFFFFF', fill: 'url(#lineGradient)' }}
             />
-            {/* Trend line (moving average) */}
-            {showTrend && trend.length > 0 && (
+            {/* Trend line (linear regression) */}
+            {showTrend && regression?.line?.length > 0 && (
               <Line
-                data={trend}
-                type="monotone"
+                data={regression.line}
+                type="linear"
                 dataKey="value"
                 stroke="#4498F2"
                 strokeDasharray="6 6"
@@ -296,6 +316,14 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
       >
         {kpi.name} for LOB
       </div>
+      {showTrend && regression && (
+        <div
+          className="absolute top-2 right-2 text-xs font-bold"
+          style={{ color: '#3047B0' }}
+        >
+          R²: {regression.r2.toFixed(2)}
+        </div>
+      )}
     </div>
   );
 }
@@ -320,6 +348,11 @@ function SecondaryPanel({ kpiKey, weekISO }) {
     return arr.slice().sort((a, b) => a.date.localeCompare(b.date));
   }, [kpiKey, weekISO]);
   const hasDaily = dailyArr.length > 0;
+  const isPercent = useMemo(() => {
+    if (!dailyArr.length) return false;
+    const maxVal = Math.max(...dailyArr.map((d) => Math.abs(d.value)));
+    return maxVal <= 1;
+  }, [dailyArr]);
   return (
     <div className="h-full w-full p-2">
       <div className="mb-2 flex items-center justify-between">
@@ -368,12 +401,16 @@ function SecondaryPanel({ kpiKey, weekISO }) {
                 />
                 <YAxis
                   tick={{ fill: '#004984', fontSize: 10 }}
+                  tickFormatter={(v) => (isPercent ? `${(v * 100).toFixed(2)}%` : v.toFixed(2))}
                   tickMargin={6}
                 />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#FFFFFF', border: '1px solid #D4D2CA', borderRadius: 10 }}
                   labelStyle={{ color: '#004984', fontSize: 10 }}
-                  formatter={(value) => [Number(value).toFixed(2), kpi.unit]}
+                  formatter={(value) => [
+                    isPercent ? `${(Number(value) * 100).toFixed(2)}%` : Number(value).toFixed(2),
+                    kpi.unit,
+                  ]}
                 />
                 <Line
                   type="monotone"

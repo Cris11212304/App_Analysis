@@ -1,5 +1,17 @@
 import React, { useMemo, useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, ReferenceLine, ReferenceArea, Bar, ComposedChart } from 'recharts';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  ResponsiveContainer,
+  ReferenceLine,
+  ReferenceArea,
+  Bar,
+  ComposedChart,
+} from 'recharts';
 
 // Payload contains the weekly KPI data along with goals. In a production
 // environment you could fetch this from a service or import from a JSON

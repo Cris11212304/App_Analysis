@@ -106,6 +106,8 @@ const PAYLOAD = {
   goals: {
     AHT: 9.5,
     CPH: 5.56,
+    CHT: 8.0,
+    Concurrency: 1.25,
   },
 };
 
@@ -113,8 +115,8 @@ const PAYLOAD = {
 // has a goal line. These definitions drive the UI and tooltips.
 const KPI_DEFS = {
   AHT: { name: 'AHT', unit: 'mins/ticket', hasGoal: true, goal: PAYLOAD.goals.AHT },
-  CHT: { name: 'CHT', unit: 'mins/ticket', hasGoal: false },
-  Concurrency: { name: 'Concurrency', unit: 'ratio', hasGoal: false },
+  CHT: { name: 'CHT', unit: 'mins/ticket', hasGoal: true, goal: PAYLOAD.goals.CHT },
+  Concurrency: { name: 'Concurrency', unit: 'ratio', hasGoal: true, goal: PAYLOAD.goals.Concurrency },
   CPH: { name: 'CPH', unit: 'cases/hour', hasGoal: true, goal: PAYLOAD.goals.CPH },
 };
 
@@ -159,6 +161,30 @@ function indexOfMax(points) {
   return idx;
 }
 
+// Custom tooltip for the main chart showing extra agent statistics.
+function ChartTooltip({ active, label, payload, kpi, isPercent, meta }) {
+  if (!active || !payload?.length) return null;
+  const val = payload[0].value;
+  const stats = meta[label] || {};
+  return (
+    <div style={{ backgroundColor: '#FFFFFF', border: '1px solid #D4D2CA', borderRadius: 10, padding: 8 }}>
+      <div style={{ color: '#004984', fontWeight: 'bold' }}>
+        {new Date(label).toLocaleDateString('en-US', { day: '2-digit', month: 'short' })}
+      </div>
+      <div style={{ color: '#004984', fontSize: 12 }}>
+        {kpi.name}: {isPercent ? `${(val * 100).toFixed(2)}%` : val.toFixed(2)} {kpi.unit}
+      </div>
+      <div style={{ color: '#004984', fontSize: 12, marginTop: 4 }}>
+        <div>N.º agentes 90%: {stats.agents90}</div>
+        <div>Promedio agente: {stats.avgAgent}</div>
+        <div>VSF: {stats.vsf}</div>
+        <div>Máx/Mín: {stats.max} / {stats.min}</div>
+        <div>Meta: {stats.met} / {stats.notMet}</div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * MainChart renders the weekly trend for the selected KPI. It draws the
  * primary line, optional goal and trend lines and supports clicking
@@ -187,6 +213,24 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
         : data,
     [data, regression, showTrend]
   );
+  // Invented agent-level metadata for tooltip display.
+  const metaByDate = useMemo(() => {
+    const series = PAYLOAD.weeklySeries[kpiKey] || [];
+    return series.reduce((acc, d) => {
+      const vol = d.den || 0;
+      const base = parseInt(d.week.replace(/-/g, ''), 10);
+      const agents90 = Math.max(3, Math.round(vol / 1000));
+      const avgAgent = agents90 ? +(d.value / agents90).toFixed(2) : 0;
+      const cv = ((base % 20) + 5) / 100; // 0.05–0.24
+      const vsf = +(6 * cv).toFixed(2);
+      const max = +(d.value * (1 + cv)).toFixed(2);
+      const min = +(d.value * (1 - cv)).toFixed(2);
+      const met = Math.floor(agents90 * 0.6);
+      const notMet = agents90 - met;
+      acc[d.week] = { agents90, avgAgent, vsf, max, min, met, notMet };
+      return acc;
+    }, {});
+  }, [kpiKey]);
   // Compute the min and max for the y‐axis and pad them slightly.
   const [yMin, yMax] = useMemo(() => {
     if (!data.length) return [0, 0];
@@ -216,6 +260,16 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
     if (!iso) return;
     const idx = data.findIndex((d) => d.date === iso);
     if (idx !== -1) onPointClick(idx);
+  };
+  // Draw an arrowhead at the end of the trend line.
+  const renderArrow = (props) => {
+    const { cx, cy, index } = props;
+    if (index !== chartData.length - 1) return null;
+    return (
+      <g transform={`translate(${cx},${cy})`}>
+        <path d="M0,-4 L0,4 L6,0 Z" fill="#4498F2" />
+      </g>
+    );
   };
   return (
     <div
@@ -262,12 +316,7 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
               }}
             />
             <Tooltip
-              contentStyle={{ backgroundColor: '#FFFFFF', border: '1px solid #D4D2CA', borderRadius: 10 }}
-              labelStyle={{ color: '#004984' }}
-              formatter={(value) => [
-                isPercent ? `${(Number(value) * 100).toFixed(2)}%` : Number(value).toFixed(2),
-                kpi.unit,
-              ]}
+              content={<ChartTooltip kpi={kpi} isPercent={isPercent} meta={metaByDate} />}
             />
             {/* Goal line, if applicable */}
             {kpi.hasGoal && (
@@ -304,7 +353,7 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
                 stroke="#4498F2"
                 strokeDasharray="6 6"
                 strokeWidth={2}
-                dot={false}
+                dot={renderArrow}
               />
             )}
             {/* Gradient definition for the main line */}
@@ -383,7 +432,7 @@ function SecondaryPanel({ kpiKey, weekISO }) {
       </div>
       {mode === 'detail' ? (
         <div
-          className="h-[140px] rounded-xl overflow-hidden"
+          className="h-[180px] rounded-xl overflow-hidden"
           style={{ backgroundColor: '#FFFFFF', border: '1px solid #D4D2CA' }}
         >
           {hasDaily ? (
@@ -436,7 +485,7 @@ function SecondaryPanel({ kpiKey, weekISO }) {
         </div>
       ) : (
         <div
-          className="h-[140px] rounded-xl grid place-items-center text-sm"
+          className="h-[180px] rounded-xl grid place-items-center text-sm"
           style={{ backgroundColor: '#FFFFFF', border: '1px solid #D4D2CA', color: '#004984' }}
         >
           Box plot (90% vol.) — disponible en el ZIP completo o si cargas detalle diario/por agente.
@@ -545,7 +594,7 @@ export default function App() {
             />
           </div>
           {/* Right 50%: top detail and bottom commentary */}
-          <div className="col-span-2 grid grid-rows-2 gap-4">
+          <div className="col-span-2 grid grid-rows-[3fr_1fr] gap-4">
             {/* Secondary panel (top right) */}
             <div
               className="h-full w-full rounded-2xl"

@@ -156,16 +156,32 @@ const KPI_DEFS = {
 // Perform a simple linear regression over the provided points (using the
 // index as the independent variable). Returns the end points of the trend
 // line along with the coefficient of determination (R²).
+//
+// The math in this function assumes the `value` property on each point
+// is a finite number. However, when data comes from an external source
+// (e.g. JSON or API) the values may be strings. If the `value` field is
+// not converted ahead of time then JavaScript will implicitly perform
+// string concatenation during summation which produces unexpected NaN
+// results for slope/intercept calculations. To guard against that we
+// coerce all y-values into numbers up front.
 function linearRegression(points) {
   const n = points.length;
   if (n === 0) return { line: [], r2: 0 };
   const xVals = points.map((_, i) => i);
-  const yVals = points.map((p) => p.value);
+  // Ensure values are numbers to avoid string concatenation
+  const yVals = points.map((p) => Number(p.value));
   const sumX = xVals.reduce((s, v) => s + v, 0);
   const sumY = yVals.reduce((s, v) => s + v, 0);
   const sumXY = xVals.reduce((s, v, i) => s + v * yVals[i], 0);
   const sumXX = xVals.reduce((s, v) => s + v * v, 0);
-  const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+  const denom = n * sumXX - sumX * sumX;
+  // Avoid division by zero – return a flat line when data cannot produce a slope
+  if (!Number.isFinite(denom) || denom === 0) {
+    const mean = sumY / n;
+    const line = points.map((p) => ({ date: p.date, value: mean }));
+    return { line, r2: 0 };
+  }
+  const slope = (n * sumXY - sumX * sumY) / denom;
   const intercept = (sumY - slope * sumX) / n;
   const line = points.map((p, i) => ({
     date: p.date,
@@ -186,8 +202,9 @@ function indexOfMax(points) {
   let idx = 0;
   let max = -Infinity;
   for (let i = 0; i < points.length; i++) {
-    if (Number.isFinite(points[i].value) && points[i].value > max) {
-      max = points[i].value;
+    const val = Number(points[i].value);
+    if (Number.isFinite(val) && val > max) {
+      max = val;
       idx = i;
     }
   }
@@ -222,7 +239,7 @@ function ChartTooltip({ active, label, payload, kpi, isPercent, meta }) {
  * MainChart renders the weekly trend for the selected KPI. It draws the
  * primary line, optional goal and trend lines and supports clicking
  * individual points to focus the secondary panel. It also rotates
- * tick labels to avoid overlap and clamps the y‐axis domain to just
+ * tick labels to avoid overlap and clamps the y‑axis domain to just
  * beyond the observed min/max values to better show variation.
  */
 function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
@@ -238,8 +255,10 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
     () =>
       (PAYLOAD.weeklySeries[kpiKey] || []).map((d) => ({
         date: d.week, // ISO string without time
-        value: +d.value,
-        count: countsByWeek[d.week] || 0,
+        // Cast to number to avoid accidental string arithmetic
+        value: Number(d.value),
+        // Cast count to number as well; countsByWeek entries are numeric
+        count: Number(countsByWeek[d.week] || 0),
       })),
     [kpiKey, countsByWeek]
   );
@@ -271,7 +290,7 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
       return acc;
     }, {});
   }, [kpiKey]);
-  // Compute the min and max for the y‐axis and pad them slightly.
+  // Compute the min and max for the y‑axis and pad them slightly.
   const [yMin, yMax] = useMemo(() => {
     if (!data.length) return [0, 0];
     let min = Infinity;
@@ -294,7 +313,7 @@ function MainChart({ kpiKey, onPointClick, selectedIndex, showTrend }) {
   // Determine the selected ISO date for the reference area.
   const selectedDate = chartData[selectedIndex]?.date;
   // Handle click events on the chart. Recharts provides the activeLabel
-  // property on the event payload which corresponds to the x‐axis label.
+  // property on the event payload which corresponds to the x‑axis label.
   const handleClick = (chartState) => {
     const iso = chartState?.activeLabel;
     if (!iso) return;
@@ -563,7 +582,10 @@ export default function App() {
   const data = useMemo(() => {
     return (PAYLOAD.weeklySeries[kpiKey] || []).map((d) => ({
       date: d.week,
-      value: d.value,
+      // Ensure the value is a number. Without this cast the linear
+      // regression and comparisons may treat the field as a string and
+      // produce NaN results (string concatenation instead of addition).
+      value: Number(d.value),
     }));
   }, [kpiKey]);
   const [showTrend, setShowTrend] = useState(true);
